@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Редактор Python для ЕГЭ 19-21</title>
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/lib/codemirror.css"
+    />
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/theme/material-darker.css"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <div class="brand">
+          <h1>ЕГЭ 19-21 · Python Studio</h1>
+          <p>
+            Редактор под задачи на теорию игр. Встроенные правила + кастомный
+            линтер.
+          </p>
+        </div>
+        <div class="actions">
+          <button class="btn" id="loadSample">Пример решения</button>
+          <button class="btn" id="runLint">Проверить</button>
+          <button class="btn primary" id="applyCustom">
+            Применить кастомные правила
+          </button>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <section class="panel editor-shell">
+          <div class="editor-header">
+            <div class="badge">Python · Monaco</div>
+            <div class="status">
+              <span class="dot"></span>
+              Линтер активен
+            </div>
+          </div>
+          <div class="editor" id="editor">
+            <textarea
+              id="fallback"
+              class="fallback"
+              spellcheck="false"
+            ># Здесь ваш код для задач 19-21
+def game(s):
+    if s >= 45:
+        return "W"
+    if s >= 40:
+        return "P1"
+    moves = [game(s + 1), game(s + 2), game(s * 2)]
+    if "W" in moves:
+        return "P1"
+    if all(m == "P1" for m in moves):
+        return "B1"
+    return "U"
+</textarea>
+          </div>
+          <div class="output" id="summary">
+            <div>Ошибок: <strong id="errorCount">0</strong></div>
+            <div>Предупреждений: <strong id="warnCount">0</strong></div>
+            <div>Инфо: <strong id="infoCount">0</strong></div>
+          </div>
+        </section>
+
+        <aside class="side">
+          <section class="panel">
+            <h2 class="section-title">Базовые правила ЕГЭ 19-21</h2>
+            <div class="rule-list" id="ruleList"></div>
+          </section>
+
+          <section class="panel">
+            <h2 class="section-title">Кастомные правила (JSON)</h2>
+            <textarea class="json-area" id="customRules"></textarea>
+            <p class="footnote">
+              Каждое правило: `id`, `message`, `regex`, `flags`, `severity`.
+              Пример ниже можно менять.
+            </p>
+          </section>
+
+          <section class="panel">
+            <h2 class="section-title">Диагностика</h2>
+            <div class="diagnostics" id="diagnostics"></div>
+          </section>
+        </aside>
+      </main>
+    </div>
+
+    <script src="./app.js"></script>
+    <script type="text/plain" id="lint-rules">
+import ast
+
+def _has_recursion(func, name):
+    class Visitor(ast.NodeVisitor):
+        def __init__(self):
+            self.found = False
+
+        def visit_Call(self, node):
+            if isinstance(node.func, ast.Name) and node.func.id == name:
+                self.found = True
+            self.generic_visit(node)
+
+    visitor = Visitor()
+    visitor.visit(func)
+    return visitor.found
+
+
+def _has_base_case(func):
+    for node in ast.walk(func):
+        if isinstance(node, ast.If):
+            for stmt in node.body:
+                if isinstance(stmt, ast.Return):
+                    return True
+    return False
+
+
+def _has_input_call(tree):
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name) and node.func.id == "input":
+                return node
+    return None
+
+
+def _has_memo_decorator(func):
+    for deco in func.decorator_list:
+        if isinstance(deco, ast.Name) and deco.id in ("lru_cache", "cache"):
+            return True
+        if isinstance(deco, ast.Attribute) and deco.attr in ("lru_cache", "cache"):
+            return True
+    return False
+
+
+def lint_code(source, enabled_rules):
+    diags = []
+    try:
+        tree = ast.parse(source)
+    except SyntaxError as err:
+        lineno = err.lineno or 1
+        offset = err.offset or 1
+        diags.append(
+            {
+                "message": f"Синтаксическая ошибка: {err.msg}",
+                "severity": "error",
+                "location": f"{lineno}:{offset}",
+            }
+        )
+        return diags
+
+    funcs = {
+        node.name: node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
+    }
+    has_game = "game" in funcs
+    has_f = "f" in funcs
+
+    if "require-function" in enabled_rules and not (has_game or has_f):
+        diags.append(
+            {
+                "message": "Нет функции game(...) или f(...).",
+                "severity": "error",
+                "location": "1:1",
+            }
+        )
+
+    if "recursion" in enabled_rules:
+        rec_ok = False
+        if has_game and _has_recursion(funcs["game"], "game"):
+            rec_ok = True
+        if has_f and _has_recursion(funcs["f"], "f"):
+            rec_ok = True
+        if not rec_ok and (has_game or has_f):
+            line = funcs["game"].lineno if has_game else funcs["f"].lineno
+            diags.append(
+                {
+                    "message": "Рекурсивный вызов функции не найден.",
+                    "severity": "error",
+                    "location": f"{line}:1",
+                }
+            )
+
+    if "base-case" in enabled_rules:
+        base_ok = False
+        for name in ("game", "f"):
+            if name in funcs and _has_base_case(funcs[name]):
+                base_ok = True
+        if not base_ok and (has_game or has_f):
+            line = funcs["game"].lineno if has_game else funcs["f"].lineno
+            diags.append(
+                {
+                    "message": "Не найден базовый случай (if ... return).",
+                    "severity": "warning",
+                    "location": f"{line}:1",
+                }
+            )
+
+    if "no-input" in enabled_rules:
+        node = _has_input_call(tree)
+        if node is not None:
+            line = getattr(node, "lineno", 1)
+            col = getattr(node, "col_offset", 0) + 1
+            diags.append(
+                {
+                    "message": "Обнаружен input(). Для задач 19-21 он обычно не нужен.",
+                    "severity": "info",
+                    "location": f"{line}:{col}",
+                }
+            )
+
+    if "memo" in enabled_rules and (has_game or has_f):
+        memo_ok = False
+        for name in ("game", "f"):
+            if name in funcs and _has_memo_decorator(funcs[name]):
+                memo_ok = True
+        if not memo_ok:
+            line = funcs["game"].lineno if has_game else funcs["f"].lineno
+            diags.append(
+                {
+                    "message": "Не найдено кэширование (lru_cache/cache).",
+                    "severity": "info",
+                    "location": f"{line}:1",
+                }
+            )
+
+    return diags
+    </script>
+  </body>
+</html>
