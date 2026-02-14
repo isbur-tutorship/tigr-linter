@@ -7,28 +7,68 @@ const ruleListEl = document.getElementById("ruleList");
 
 const builtinRules = [
   {
-    id: "require-function",
-    title: "Функция игры",
-    description: "Определите функцию game(...) или f(...).",
+    id: "require-w",
+    title: "Функция w",
+    description: "Определите функцию w(a, m) или w(a, b, m).",
     severity: "error",
     enabled: true,
-    message: "Нет функции game(...) или f(...).",
+    message: "Нужна функция w(a, m) (или w(a, b, m)).",
+  },
+  {
+    id: "signature",
+    title: "Сигнатура",
+    description: "Параметры должны быть a, m (или a, b, m).",
+    severity: "error",
+    enabled: true,
+    message: "Сигнатура должна быть w(a, m) или w(a, b, m).",
   },
   {
     id: "recursion",
-    title: "Рекурсивный ход",
-    description: "Функция должна вызывать сама себя.",
+    title: "Рекурсия",
+    description: "Функция должна вызывать w(...) внутри себя.",
     severity: "error",
     enabled: true,
-    message: "Рекурсивный вызов функции не найден.",
+    message: "Рекурсивные вызовы w(...) не найдены.",
   },
   {
-    id: "base-case",
-    title: "Базовые случаи",
-    description: "Должен быть хотя бы один if с условием завершения.",
+    id: "base-win",
+    title: "База: a >= 34",
+    description: "Должно быть if a >= 34: return m%2==0.",
+    severity: "error",
+    enabled: true,
+    message: "Нужен базовый случай: if a >= 34: return m%2==0.",
+  },
+  {
+    id: "base-steps",
+    title: "База: m == 0",
+    description: "Должно быть if m == 0: return False.",
+    severity: "error",
+    enabled: true,
+    message: "Нужен базовый случай: if m == 0: return False.",
+  },
+  {
+    id: "moves",
+    title: "Ходы",
+    description: "Нужны ходы w(a+2, m-1) и w(a*3, m-1).",
+    severity: "error",
+    enabled: true,
+    message: "Нужен список ходов: h = [w(a+2, m-1), w(a*3, m-1)].",
+  },
+  {
+    id: "any-all",
+    title: "any/all по m%2",
+    description: "Логика any/all должна зависеть от m%2.",
     severity: "warning",
     enabled: true,
-    message: "Не найден базовый случай (if ... return).",
+    message: "Нужна логика any/all по условию m%2.",
+  },
+  {
+    id: "prints",
+    title: "Ответы 19-21",
+    description: "Нужны print для 19, 20, 21 задач.",
+    severity: "info",
+    enabled: true,
+    message: "Нужны печати ответов для 19, 20, 21 задач.",
   },
   {
     id: "no-input",
@@ -37,14 +77,6 @@ const builtinRules = [
     severity: "info",
     enabled: true,
     message: "Обнаружен input(). Для задач 19-21 он обычно не нужен.",
-  },
-  {
-    id: "memo",
-    title: "Кэширование",
-    description: "Рекомендуется memoization (lru_cache).",
-    severity: "info",
-    enabled: true,
-    message: "Не найдено кэширование (lru_cache/cache).",
   },
 ];
 
@@ -404,18 +436,15 @@ document
   .addEventListener("click", () => lintNow());
 document.getElementById("loadSample").addEventListener("click", () => {
   setCode(`# Решение под задачи 19-21 (пример)
-from functools import lru_cache
+def w(a, m):    # def w(a, b, m): — для двух куч
+    if a >= 34: return m%2==0       # Условие победы
+    if m == 0: return False         # Прекращаем перебор
+    h = [w(a+2, m-1), w(a*3, m-1)]  # Перебор ходов
+    return any(h) if m%2 else all(h)
 
-@lru_cache(None)
-def game(s):
-    if s >= 45:
-        return "W"
-    moves = [game(s + 1), game(s + 2), game(s * 2)]
-    if "W" in moves:
-        return "P1"
-    if all(m == "P1" for m in moves):
-        return "B1"
-    return "U"
+print(19, [s for s in range(1, 34) if w(s, 1)])
+print(20, [s for s in range(1, 34) if w(s, 3) and not w(s, 1)])
+print(21, [s for s in range(1, 34) if w(s, 4) and not w(s, 2)])
 `);
   lintNow();
 });
